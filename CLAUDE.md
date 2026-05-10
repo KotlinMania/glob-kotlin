@@ -168,9 +168,9 @@ Workflow:
    `Mod.kt`. Append, never delete. Once all callers are migrated, the `typealias` (if any) is
    removed; the tracking file remains as the ledger of the migration.
 
-Reference example: [/Volumes/stuff/Projects/kotlinmania/serde-kotlin/tmp/serde/serde_core/src/private/mod.rs](/Volumes/stuff/Projects/kotlinmania/serde-kotlin/tmp/serde/serde_core/src/private/mod.rs)
+Reference example: `tmp/serde/serde_core/src/private/mod.rs`
 re-exports `Result` from `crate::lib::result`. The Kotlin tracking file lives at
-[/Volumes/stuff/Projects/kotlinmania/serde-kotlin/src/commonMain/kotlin/io/github/kotlinmania/serde/core/private/Mod.kt](/Volumes/stuff/Projects/kotlinmania/serde-kotlin/src/commonMain/kotlin/io/github/kotlinmania/serde/core/private/Mod.kt).
+`src/commonMain/kotlin/io/github/kotlinmania/serde/core/private/Mod.kt`.
 A caller that previously did `import io.github.kotlinmania.serde.core.private.Result` is
 rewritten to `import kotlin.Result as Result` (or just removes the import and relies on the
 auto-imported `kotlin.Result`).
