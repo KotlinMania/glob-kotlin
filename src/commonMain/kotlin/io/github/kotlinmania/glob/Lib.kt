@@ -97,7 +97,7 @@ class Pattern private constructor(
     private val tokens: List<PatternToken>,
     internal val isRecursive: Boolean,
     /**
-     * A Boolean value that indicates whether the pattern contains any metacharacters.
+     * Indicates whether the pattern contains any metacharacters.
      * We use this information for some fast path optimizations.
      */
     internal val hasMetachars: Boolean,
@@ -135,7 +135,7 @@ class Pattern private constructor(
     }
 
     /**
-     * Return if the given [str] matches this [Pattern] using the default
+     * Returns whether the given [str] matches this [Pattern] using the default
      * match options (i.e. [MatchOptions.new]).
      *
      * # Examples
@@ -149,7 +149,7 @@ class Pattern private constructor(
     fun matches(str: String): Boolean = matchesWith(str, MatchOptions.new())
 
     /**
-     * Return if the given [str] matches this [Pattern] using the specified
+     * Returns whether the given [str] matches this [Pattern] using the specified
      * match options.
      */
     fun matchesWith(str: String, options: MatchOptions): Boolean =
