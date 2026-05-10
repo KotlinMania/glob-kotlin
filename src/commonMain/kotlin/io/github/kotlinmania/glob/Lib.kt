@@ -97,7 +97,7 @@ class Pattern private constructor(
     private val tokens: List<PatternToken>,
     internal val isRecursive: Boolean,
     /**
-     * A bool value that indicates whether the pattern contains any metacharacters.
+     * A Boolean value that indicates whether the pattern contains any metacharacters.
      * We use this information for some fast path optimizations.
      */
     internal val hasMetachars: Boolean,
