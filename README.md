@@ -92,7 +92,7 @@ See [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) for translator discipline,
 
 ### License
 
-This Kotlin port is distributed under the same MIT license as the upstream [`rust-lang/glob`](https://github.com/rust-lang/glob). See [LICENSE](LICENSE) (and any sibling `LICENSE-*` / `NOTICE` files mirrored from upstream) for the full text.
+This Kotlin port is distributed under Apache 2.0. See [LICENSE](LICENSE) for the full text.
 
 Original work copyrighted by the glob authors.  
 Kotlin port: Copyright (c) 2026 Sydney Renee and The Solace Project.
