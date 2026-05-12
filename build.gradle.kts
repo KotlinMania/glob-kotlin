@@ -1,3 +1,6 @@
+import org.gradle.api.tasks.testing.AbstractTestTask
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootExtension
@@ -42,35 +45,89 @@ kotlin {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 
+    // ---- Maximal Kotlin 2.3.21 target coverage ----
+    //
+    // Every non-JVM Kotlin target the compiler supports is declared here.
+    // `jvm()` is intentionally omitted: this workspace standardizes on
+    // strict-KMP (no JVM-only target — see threadlocal-kotlin for the one
+    // documented exception). CodeQL Kotlin extraction is handled by the
+    // dedicated `codeqlCompileJvm` JavaExec task further down this file
+    // instead of a real jvm() target, because the K2 multiplatform pipeline
+    // for `compileKotlinJvm` bypasses the legacy K2JVMCompiler.doExecute
+    // path the CodeQL Java agent hooks.
+
     val xcf = XCFramework("Glob")
 
+    // Apple desktop
     macosArm64 {
-        binaries.framework {
-            baseName = "Glob"
-            xcf.add(this)
-        }
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
     }
-    linuxX64()
-    mingwX64()
+    // macosX64 was removed in Kotlin 2.3 — "Target is no longer available."
+
+    // iOS
     iosArm64 {
-        binaries.framework {
-            baseName = "Glob"
-            xcf.add(this)
-        }
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
     }
     iosSimulatorArm64 {
-        binaries.framework {
-            baseName = "Glob"
-            xcf.add(this)
-        }
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
     }
+    iosX64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+
+    // tvOS
+    tvosArm64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    tvosSimulatorArm64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    // tvosX64 was removed in Kotlin 2.3 — "Target is no longer available."
+
+    // watchOS
+    watchosArm32 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    watchosArm64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    watchosDeviceArm64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    watchosSimulatorArm64 {
+        binaries.framework { baseName = "Glob"; xcf.add(this) }
+    }
+    // watchosX64 was removed in Kotlin 2.3 — "Target is no longer available."
+
+    // Linux
+    linuxX64()
+    linuxArm64()
+
+    // Windows
+    mingwX64()
+
+    // Android native (NDK targets — separate from the Android JVM library below)
+    androidNativeArm32()
+    androidNativeArm64()
+    androidNativeX86()
+    androidNativeX64()
+
+    // Web — JS (browser + nodejs runtimes on a single target)
     js {
         browser()
         nodejs()
     }
+
+    // Web — WasmJS
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
         browser()
+        nodejs()
+    }
+
+    // Web — WasmWASI (experimental; nodejs runtime via wasi-preview1)
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmWasi {
         nodejs()
     }
 
@@ -105,12 +162,36 @@ kotlin {
     jvmToolchain(21)
 }
 
+// Show every test event in the CI log so runs are auditable.
+// Without this, gradle's default test-task output is just
+// `> Task :iosSimulatorArm64Test` with no per-test PASSED/FAILED,
+// which makes a green run indistinguishable from a no-op task. The
+// XML/HTML reports in build/test-results/ and build/reports/tests/ still
+// carry the canonical record, but those aren't visible in CI logs.
+tasks.withType<AbstractTestTask>().configureEach {
+    testLogging {
+        events(
+            TestLogEvent.STARTED,
+            TestLogEvent.PASSED,
+            TestLogEvent.SKIPPED,
+            TestLogEvent.FAILED,
+            TestLogEvent.STANDARD_OUT,
+            TestLogEvent.STANDARD_ERROR,
+        )
+        exceptionFormat = TestExceptionFormat.FULL
+        showCauses = true
+        showExceptions = true
+        showStackTraces = true
+        showStandardStreams = true
+    }
+}
+
 rootProject.extensions.configure<NodeJsEnvSpec>("kotlinNodeJsSpec") {
-    version.set("22.22.2")
+    version.set("24.15.0")
 }
 
 rootProject.extensions.configure<WasmNodeJsEnvSpec>("kotlinWasmNodeJsSpec") {
-    version.set("22.22.2")
+    version.set("24.15.0")
 }
 
 rootProject.extensions.configure<YarnRootEnvSpec>("kotlinYarnSpec") {
