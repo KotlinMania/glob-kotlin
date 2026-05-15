@@ -97,7 +97,7 @@ class Pattern private constructor(
     private val tokens: List<PatternToken>,
     internal val isRecursive: Boolean,
     /**
-     * A bool value that indicates whether the pattern contains any metacharacters.
+     * Indicates whether the pattern contains any metacharacters.
      * We use this information for some fast path optimizations.
      */
     internal val hasMetachars: Boolean,
@@ -135,7 +135,7 @@ class Pattern private constructor(
     }
 
     /**
-     * Return if the given [str] matches this [Pattern] using the default
+     * Returns whether the given [str] matches this [Pattern] using the default
      * match options (i.e. [MatchOptions.new]).
      *
      * # Examples
@@ -149,7 +149,7 @@ class Pattern private constructor(
     fun matches(str: String): Boolean = matchesWith(str, MatchOptions.new())
 
     /**
-     * Return if the given [str] matches this [Pattern] using the specified
+     * Returns whether the given [str] matches this [Pattern] using the specified
      * match options.
      */
     fun matchesWith(str: String, options: MatchOptions): Boolean =
@@ -169,7 +169,7 @@ class Pattern private constructor(
                 PatternToken.AnySequence,
                 PatternToken.AnyRecursiveSequence -> {
                     // ** must be at the start.
-                    // debug_assert!: AnyRecursiveSequence implies followsSeparator.
+                    // Invariant: AnyRecursiveSequence implies followsSeparator.
 
                     // Empty match
                     val emptyMatch = matchesFrom(fs, file, pos, i + ti + 1, options)
@@ -228,7 +228,7 @@ class Pattern private constructor(
             }
         }
 
-        // Iter is fused.
+        // Iterator behavior is fused.
         return if (pos >= file.length) MatchResult.Match else MatchResult.SubPatternDoesntMatch
     }
 
@@ -413,7 +413,7 @@ private fun inCharSpecifiers(
             is CharSpecifier.CharRange -> {
                 val rawStart = specifier.start
                 val rawEnd = specifier.end
-                // FIXME: work with non-ascii chars properly (issue #1347)
+                // FIXME: handle non-ASCII characters properly.
                 if (!options.caseSensitive && c.isAscii() && rawStart.isAscii() && rawEnd.isAscii()) {
                     val start = rawStart.lowercaseChar()
                     val end = rawEnd.lowercaseChar()
@@ -448,7 +448,7 @@ private fun charsEq(a: Char, b: Char, caseSensitive: Boolean): Boolean {
         // any platform without having to canonicalize them first.
         true
     } else if (!caseSensitive && a.isAscii() && b.isAscii()) {
-        // FIXME: work with non-ascii chars properly (issue #9084)
+        // FIXME: handle non-ASCII characters properly.
         a.equals(b, ignoreCase = true)
     } else {
         a == b
