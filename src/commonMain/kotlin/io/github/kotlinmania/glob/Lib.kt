@@ -21,12 +21,347 @@
  */
 package io.github.kotlinmania.glob
 
+import io.github.kotlinmania.io.files.Path as KxPath
+import io.github.kotlinmania.io.files.SystemFileSystem
+
 /**
  * Returns whether [c] is a path component separator. Both `/` (Unix) and `\`
  * (Windows) are treated as separators so that patterns match path strings on
  * any platform.
  */
 internal fun isPathSeparator(c: Char): Boolean = c == '/' || c == '\\'
+
+/**
+ * An iterator that yields paths from the filesystem that match a particular
+ * pattern.
+ *
+ * Note that it yields [GlobResult] in order to report any I/O errors that may
+ * arise during iteration. If a directory matches but is unreadable,
+ * thereby preventing its contents from being checked for matches, a
+ * [GlobError] is returned to express this.
+ *
+ * See the [glob] function for more details.
+ */
+class Paths internal constructor(
+    private val dirPatterns: List<Pattern>,
+    private val requireDir: Boolean,
+    private val options: MatchOptions,
+    private val todo: ArrayDeque<TodoItem>,
+    private var scope: PathWrapper?,
+) : Iterator<GlobResult> {
+
+    private var cached: GlobResult? = null
+    private var exhausted: Boolean = false
+
+    override fun hasNext(): Boolean {
+        if (cached != null) return true
+        if (exhausted) return false
+        cached = computeNext()
+        if (cached == null) exhausted = true
+        return cached != null
+    }
+
+    override fun next(): GlobResult {
+        if (cached == null && !exhausted) {
+            cached = computeNext()
+            if (cached == null) exhausted = true
+        }
+        val nextItem = cached ?: throw NoSuchElementException()
+        cached = null
+        return nextItem
+    }
+
+    private fun computeNext(): GlobResult? {
+        // The todo buffer hasn't been initialized yet, so it's done at this
+        // point rather than in glob() so that the errors are unified — failing
+        // to fill the buffer is an iteration error. Construction of the
+        // iterator (i.e. glob()) only fails if it fails to compile the Pattern.
+        val initialScope = scope
+        if (initialScope != null) {
+            scope = null
+            if (dirPatterns.isNotEmpty()) {
+                // Shouldn't happen, but Int.MAX_VALUE is reserved as a special
+                // "already matched" index marker.
+                check(dirPatterns.size < Int.MAX_VALUE)
+
+                fillTodo(todo, dirPatterns, 0, initialScope, options)
+            }
+        }
+
+        while (true) {
+            if (dirPatterns.isEmpty() || todo.isEmpty()) {
+                return null
+            }
+
+            val popped = todo.removeLast()
+            if (popped.error != null) {
+                return GlobResult.Err(popped.error)
+            }
+            val pathWrap = popped.path!!
+            var idx = popped.idx
+
+            // idx Int.MAX_VALUE: was already checked by fillTodo, maybe path
+            // was '.' or '..' that we can't match here because of normalization.
+            if (idx == Int.MAX_VALUE) {
+                if (requireDir && !pathWrap.isDirectory) {
+                    continue
+                }
+                return GlobResult.Ok(pathWrap.path)
+            }
+
+            if (dirPatterns[idx].isRecursive) {
+                var nextIdx = idx
+
+                // collapse consecutive recursive patterns
+                while ((nextIdx + 1) < dirPatterns.size && dirPatterns[nextIdx + 1].isRecursive) {
+                    nextIdx += 1
+                }
+
+                if (pathWrap.isDirectory) {
+                    // the path is a directory, so it's a match
+
+                    // push this directory's contents
+                    fillTodo(todo, dirPatterns, nextIdx, pathWrap, options)
+
+                    if (nextIdx == dirPatterns.size - 1) {
+                        // pattern ends in recursive pattern, so return this
+                        // directory as a result
+                        return GlobResult.Ok(pathWrap.path)
+                    } else {
+                        // advance to the next pattern for this path
+                        idx = nextIdx + 1
+                    }
+                } else if (nextIdx == dirPatterns.size - 1) {
+                    // not a directory and it's the last pattern, meaning no
+                    // match
+                    continue
+                } else {
+                    // advance to the next pattern for this path
+                    idx = nextIdx + 1
+                }
+            }
+
+            // not recursive, so match normally
+            val fileName = pathFileName(pathWrap.path)
+            if (fileName == null) {
+                // FIXME: how do we handle non-UTF8 / unrepresentable file
+                // names? Ignore them for now; ideally we'd still match them
+                // against a `*`.
+                continue
+            }
+            if (dirPatterns[idx].matchesWith(fileName, options)) {
+                if (idx == dirPatterns.size - 1) {
+                    // it is not possible for a pattern to match a directory
+                    // *AND* its children so we don't need to check the
+                    // children
+                    if (!requireDir || pathWrap.isDirectory) {
+                        return GlobResult.Ok(pathWrap.path)
+                    }
+                } else {
+                    fillTodo(todo, dirPatterns, idx + 1, pathWrap, options)
+                }
+            }
+        }
+        @Suppress("UNREACHABLE_CODE") return null
+    }
+}
+
+/**
+ * Returns an iterator that produces all paths that match the given
+ * [pattern] using default match options, which may be absolute or relative
+ * to the current working directory.
+ *
+ * This may throw a [PatternError] if the pattern is invalid.
+ *
+ * This method uses the default match options and is equivalent to calling
+ * [globWith] with [MatchOptions.new]. Use [globWith] directly if you want to
+ * use non-default match options.
+ *
+ * When iterating, each result is a [GlobResult] which expresses the
+ * possibility that there was an I/O error when attempting to read the contents
+ * of the matched path. In other words, each item returned by the iterator
+ * will either be a [GlobResult.Ok] if the path matched, or a [GlobResult.Err]
+ * if the path (partially) matched _but_ its contents could not be read in
+ * order to determine if its contents matched.
+ *
+ * See the [Paths] documentation for more information.
+ *
+ * Paths are yielded in alphabetical order.
+ */
+fun glob(pattern: String): Paths = globWith(pattern, MatchOptions.new())
+
+/**
+ * Returns an iterator that produces all paths that match the given [pattern]
+ * using the specified [options], which may be absolute or relative to the
+ * current working directory.
+ *
+ * This may throw a [PatternError] if the pattern is invalid.
+ *
+ * This function accepts Unix shell style patterns as described by
+ * [Pattern.new]. The options given are passed through unchanged to
+ * [Pattern.matchesWith] with the exception that [MatchOptions.requireLiteralSeparator]
+ * is always set to `true` regardless of the value passed to this function.
+ *
+ * Paths are yielded in alphabetical order.
+ */
+fun globWith(pattern: String, options: MatchOptions): Paths {
+    // make sure that the pattern is valid first, else early return with error
+    Pattern.new(pattern)
+
+    // Skip a leading absolute-path prefix (Unix `/`, Windows `\`).
+    // Mirrors Rust's `Path::components().peekable()` advance over Prefix/RootDir.
+    var rootLen = 0
+    while (rootLen < pattern.length && isPathSeparator(pattern[rootLen])) {
+        rootLen += 1
+    }
+    val root: String? = if (rootLen > 0) pattern.substring(0, rootLen) else null
+
+    val scopePath = root ?: "."
+    val scopeWrap = PathWrapper.fromPath(scopePath)
+
+    val dirPatterns = ArrayList<Pattern>()
+    val rest = pattern.substring(rootLen)
+    if (rest.isNotEmpty()) {
+        for (component in rest.split('/', '\\')) {
+            if (component.isEmpty()) continue
+            dirPatterns.add(Pattern.new(component))
+        }
+    }
+
+    if (rootLen == pattern.length) {
+        // Pattern consists only of root separators; mirror Rust pushing an
+        // empty Pattern so the iterator yields the root itself.
+        dirPatterns.add(Pattern.default())
+    }
+
+    val lastChar = pattern.lastOrNull()
+    val requireDir = lastChar != null && isPathSeparator(lastChar)
+
+    return Paths(
+        dirPatterns = dirPatterns,
+        requireDir = requireDir,
+        options = options,
+        todo = ArrayDeque(),
+        scope = scopeWrap,
+    )
+}
+
+/**
+ * A glob iteration error.
+ *
+ * This is typically returned when a particular path cannot be read
+ * to determine if its contents match the glob pattern. This is possible
+ * if the program lacks the appropriate permissions, for example.
+ */
+class GlobError internal constructor(
+    private val pathStr: String,
+    private val ioError: Throwable,
+) : Throwable("attempting to read `$pathStr` resulted in an error: ${ioError.message}") {
+
+    /** The path that the error corresponds to. */
+    fun path(): String = pathStr
+
+    /** The error in question. */
+    fun error(): Throwable = ioError
+
+    /** Consumes self, returning the underlying I/O error. */
+    fun intoError(): Throwable = ioError
+}
+
+/**
+ * Lightweight wrapper bundling a path with whether it points at a directory,
+ * so the iterator does not have to re-stat the same path repeatedly.
+ *
+ * Internal to mirror Rust's private `PathWrapper` struct.
+ */
+internal class PathWrapper internal constructor(
+    val path: String,
+    val isDirectory: Boolean,
+) {
+    companion object {
+        /**
+         * Builds a wrapper from a directory listing entry. If the entry is a
+         * symlink the directory bit is resolved by stat'ing the target path
+         * (matching Rust's `from_dir_entry` semantics that fall back to
+         * `fs::metadata` on symlinks rather than trusting `file_type()`).
+         */
+        fun fromDirChild(fullPath: String, childIsDirectory: Boolean, childIsSymlink: Boolean): PathWrapper {
+            val resolvedIsDir = if (childIsSymlink) {
+                SystemFileSystem.metadataOrNull(KxPath(fullPath))?.isDirectory ?: false
+            } else {
+                childIsDirectory
+            }
+            return PathWrapper(fullPath, resolvedIsDir)
+        }
+
+        /** Builds a wrapper from a bare path string, stat'ing once for the directory bit. */
+        fun fromPath(path: String): PathWrapper {
+            val isDir = SystemFileSystem.metadataOrNull(KxPath(path))?.isDirectory ?: false
+            return PathWrapper(path, isDir)
+        }
+    }
+}
+
+/**
+ * A glob iteration result.
+ *
+ * This represents either a matched path or a glob iteration error, such as
+ * failing to read a particular directory's contents. Mirrors Rust's
+ * `pub type GlobResult = Result<PathBuf, GlobError>;` via a sealed result so
+ * the error data is reachable without unwrapping a generic `Result`.
+ */
+sealed class GlobResult {
+    /** The pattern matched [path]. */
+    data class Ok(val path: String) : GlobResult()
+
+    /** An I/O error prevented determining whether the path matched. */
+    data class Err(val error: GlobError) : GlobResult()
+}
+
+/**
+ * Single entry pushed into [Paths]'s pending-work buffer. Either a
+ * `(path, pattern-index)` pair to inspect, or an [error] that should be
+ * surfaced through the iterator. Mirrors Rust's
+ * `Result<(PathWrapper, usize), GlobError>` element type.
+ */
+internal class TodoItem private constructor(
+    val path: PathWrapper?,
+    val idx: Int,
+    val error: GlobError?,
+) {
+    companion object {
+        fun ofPair(path: PathWrapper, idx: Int): TodoItem = TodoItem(path, idx, null)
+        fun ofError(error: GlobError): TodoItem = TodoItem(null, 0, error)
+    }
+}
+
+/**
+ * Joins [child] onto [parent] using a forward slash unless [parent] already
+ * ends with a separator. Used in place of Rust's `Path::join`, which is
+ * platform-aware but converges to the same shape for glob's path strings.
+ */
+internal fun pathJoin(parent: String, child: String): String {
+    if (parent.isEmpty()) return child
+    val last = parent[parent.length - 1]
+    return if (isPathSeparator(last)) parent + child else "$parent/$child"
+}
+
+/**
+ * Returns the last path component of [path], or `null` if the path has none
+ * (e.g. it is empty or ends in a trailing separator with nothing after).
+ * Equivalent to Rust's `Path::file_name`, but operating on `String` rather
+ * than the OS-typed `Path`.
+ */
+internal fun pathFileName(path: String): String? {
+    if (path.isEmpty()) return null
+    var end = path.length
+    // Trim trailing separators so e.g. "foo/" yields "foo".
+    while (end > 0 && isPathSeparator(path[end - 1])) end -= 1
+    if (end == 0) return null
+    var start = end
+    while (start > 0 && !isPathSeparator(path[start - 1])) start -= 1
+    return path.substring(start, end)
+}
 
 /** A pattern parsing error. */
 class PatternError(
@@ -36,7 +371,7 @@ class PatternError(
     val msg: String,
 ) : Throwable("Pattern syntax error near position $pos: $msg")
 
-private sealed class PatternToken {
+internal sealed class PatternToken {
     data class Char(val c: kotlin.Char) : PatternToken()
     object AnyChar : PatternToken()
     object AnySequence : PatternToken()
@@ -45,7 +380,7 @@ private sealed class PatternToken {
     data class AnyExcept(val specifiers: List<CharSpecifier>) : PatternToken()
 }
 
-private sealed class CharSpecifier {
+internal sealed class CharSpecifier {
     data class SingleChar(val c: Char) : CharSpecifier()
     data class CharRange(val start: Char, val end: Char) : CharSpecifier()
 }
@@ -94,7 +429,7 @@ private const val ERROR_INVALID_RANGE: String = "invalid range pattern"
  */
 class Pattern private constructor(
     private val original: String,
-    private val tokens: List<PatternToken>,
+    internal val tokens: List<PatternToken>,
     internal val isRecursive: Boolean,
     /**
      * Indicates whether the pattern contains any metacharacters.
@@ -379,6 +714,100 @@ class Pattern private constructor(
                 if (chars[k] == needle) return k - from
             }
             return null
+        }
+    }
+}
+
+// Fills [todo] with paths under [path] to be matched by `patterns[idx]`,
+// special-casing patterns to match `.` and `..`, and avoiding directory
+// listing when there are no metacharacters in the pattern.
+internal fun fillTodo(
+    todo: ArrayDeque<TodoItem>,
+    patterns: List<Pattern>,
+    idx: Int,
+    path: PathWrapper,
+    options: MatchOptions,
+) {
+    val add: (PathWrapper) -> Unit = { nextPath ->
+        if (idx + 1 == patterns.size) {
+            // We know it's good, so don't make the iterator match this path
+            // against the pattern again. In particular, it can't match
+            // . or .. globs since these never show up as path components.
+            todo.addLast(TodoItem.ofPair(nextPath, Int.MAX_VALUE))
+        } else {
+            fillTodo(todo, patterns, idx + 1, nextPath, options)
+        }
+    }
+
+    val pattern = patterns[idx]
+    val isDir = path.isDirectory
+    val curdir = path.path == "."
+
+    when {
+        !pattern.hasMetachars -> {
+            // Invariant: a pattern without metacharacters is a literal sequence
+            // of Char tokens only.
+            val s = pattern.asStr()
+
+            // This pattern component doesn't have any metacharacters, so we
+            // don't need to read the current directory to know where to
+            // continue. So instead of passing control back to the iterator,
+            // we can just check for that one entry and potentially recurse
+            // right away.
+            val special = s == "." || s == ".."
+            val nextPathStr = if (curdir) s else pathJoin(path.path, s)
+            val nextPath = PathWrapper.fromPath(nextPathStr)
+            val exists = SystemFileSystem.metadataOrNull(KxPath(nextPathStr)) != null
+            if ((special && isDir) || (!special && exists)) {
+                add(nextPath)
+            }
+        }
+        isDir -> {
+            // List the directory; if it fails (permissions etc.) surface the
+            // error through the todo buffer just like Rust does.
+            val children: MutableList<PathWrapper> = try {
+                SystemFileSystem.list(KxPath(path.path)).mapNotNull { childPath ->
+                    val name = childPath.name
+                    if (name.isEmpty()) return@mapNotNull null
+                    val fullPath = if (curdir) name else pathJoin(path.path, name)
+                    val md = SystemFileSystem.metadataOrNull(childPath)
+                    val childIsDir = md?.isDirectory ?: false
+                    // km-io has no symlink discriminator on FileMetadata, so we
+                    // treat the metadata bit as authoritative for the directory
+                    // check — matching Rust's fallback `fs::metadata` path.
+                    PathWrapper(fullPath, childIsDir)
+                }.toMutableList()
+            } catch (e: Throwable) {
+                todo.addLast(TodoItem.ofError(GlobError(path.path, e)))
+                return
+            }
+
+            if (options.requireLiteralLeadingDot) {
+                children.removeAll { (pathFileName(it.path) ?: "").startsWith('.') }
+            }
+            // Sort descending by file name so subsequent removeLast() yields
+            // children in ascending alphabetical order, matching the upstream
+            // `children.sort_by(|p1, p2| p2.file_name().cmp(&p1.file_name()))`
+            // plus `Vec::pop` ordering.
+            children.sortByDescending { pathFileName(it.path) ?: "" }
+            for (child in children) {
+                todo.addLast(TodoItem.ofPair(child, idx))
+            }
+
+            // Matching the special directory entries . and .. that
+            // refer to the current and parent directory respectively
+            // requires that the pattern has a leading dot, even if the
+            // MatchOptions field requireLiteralLeadingDot is not set.
+            if (pattern.tokens.isNotEmpty() && pattern.tokens[0] == PatternToken.Char('.')) {
+                for (special in listOf(".", "..")) {
+                    if (pattern.matchesWith(special, options)) {
+                        add(PathWrapper.fromPath(pathJoin(path.path, special)))
+                    }
+                }
+            }
+        }
+        else -> {
+            // not a directory, nothing more to find
         }
     }
 }

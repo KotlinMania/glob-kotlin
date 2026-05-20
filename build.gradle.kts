@@ -273,6 +273,14 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
+                // Multiplatform filesystem (replaces Rust std::fs::read_dir/metadata
+                // for the Paths iterator and fillTodo walker). km-io is the
+                // kotlinmania fork of kotlinx-io that publishes for the full
+                // 22-target matrix (the upstream tree omits the AGP `android`
+                // target). Built locally via publishToMavenLocal out of
+                // /Volumes/stuff/Projects/kotlinmania/km-io until it's
+                // released to Maven Central.
+                implementation("io.github.kotlinmania:km-io-core:0.1.0")
             }
         }
         val commonTest by getting {
@@ -430,6 +438,7 @@ dependencies {
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.11.0")
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-datetime-jvm:0.8.0")
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-collections-immutable-jvm:0.4.0")
+    codeqlSourceClasspath("io.github.kotlinmania:km-io-core-jvm:0.1.0")
 }
 
 val codeqlCompileJvm = tasks.register<JavaExec>("codeqlCompileJvm") {
