@@ -277,9 +277,7 @@ kotlin {
                 // for the Paths iterator and fillTodo walker). km-io is the
                 // kotlinmania fork of kotlinx-io that publishes for the full
                 // 22-target matrix (the upstream tree omits the AGP `android`
-                // target). Built locally via publishToMavenLocal out of
-                // /Volumes/stuff/Projects/kotlinmania/km-io until it's
-                // released to Maven Central.
+                // target).
                 implementation("io.github.kotlinmania:km-io-core:0.1.0")
             }
         }
