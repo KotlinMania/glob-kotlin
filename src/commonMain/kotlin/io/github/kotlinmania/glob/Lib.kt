@@ -1,4 +1,4 @@
-// port-lint: source src/lib.rs
+// port-lint: source lib.rs
 // Copyright 2014 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
@@ -46,7 +46,7 @@ class Paths internal constructor(
     private val dirPatterns: List<Pattern>,
     private val requireDir: Boolean,
     private val options: MatchOptions,
-    private val todo: ArrayDeque<TodoItem>,
+    private val workQueue: ArrayDeque<TodoItem>,
     private var scope: PathWrapper?,
 ) : Iterator<GlobResult> {
 
@@ -72,7 +72,7 @@ class Paths internal constructor(
     }
 
     private fun computeNext(): GlobResult? {
-        // The todo buffer hasn't been initialized yet, so it's done at this
+        // The work queue hasn't been initialized yet, so it's done at this
         // point rather than in glob() so that the errors are unified — failing
         // to fill the buffer is an iteration error. Construction of the
         // iterator (i.e. glob()) only fails if it fails to compile the Pattern.
@@ -84,16 +84,12 @@ class Paths internal constructor(
                 // "already matched" index marker.
                 check(dirPatterns.size < Int.MAX_VALUE)
 
-                fillTodo(todo, dirPatterns, 0, initialScope, options)
+                fillTodo(workQueue, dirPatterns, 0, initialScope, options)
             }
         }
 
-        while (true) {
-            if (dirPatterns.isEmpty() || todo.isEmpty()) {
-                return null
-            }
-
-            val popped = todo.removeLast()
+        while (dirPatterns.isNotEmpty() && workQueue.isNotEmpty()) {
+            val popped = workQueue.removeLast()
             if (popped.error != null) {
                 return GlobResult.Err(popped.error)
             }
@@ -121,7 +117,7 @@ class Paths internal constructor(
                     // the path is a directory, so it's a match
 
                     // push this directory's contents
-                    fillTodo(todo, dirPatterns, nextIdx, pathWrap, options)
+                    fillTodo(workQueue, dirPatterns, nextIdx, pathWrap, options)
 
                     if (nextIdx == dirPatterns.size - 1) {
                         // pattern ends in recursive pattern, so return this
@@ -158,11 +154,11 @@ class Paths internal constructor(
                         return GlobResult.Ok(pathWrap.path)
                     }
                 } else {
-                    fillTodo(todo, dirPatterns, idx + 1, pathWrap, options)
+                    fillTodo(workQueue, dirPatterns, idx + 1, pathWrap, options)
                 }
             }
         }
-        @Suppress("UNREACHABLE_CODE") return null
+        return null
     }
 }
 
@@ -209,7 +205,7 @@ fun globWith(pattern: String, options: MatchOptions): Paths {
     Pattern.new(pattern)
 
     // Skip a leading absolute-path prefix (Unix `/`, Windows `\`).
-    // Mirrors Rust's `Path::components().peekable()` advance over Prefix/RootDir.
+    // Advance over any leading root separators before splitting components.
     var rootLen = 0
     while (rootLen < pattern.length && isPathSeparator(pattern[rootLen])) {
         rootLen += 1
@@ -229,8 +225,8 @@ fun globWith(pattern: String, options: MatchOptions): Paths {
     }
 
     if (rootLen == pattern.length) {
-        // Pattern consists only of root separators; mirror Rust pushing an
-        // empty Pattern so the iterator yields the root itself.
+        // Pattern consists only of root separators; add an empty Pattern so
+        // the iterator yields the root itself.
         dirPatterns.add(Pattern.default())
     }
 
@@ -241,7 +237,7 @@ fun globWith(pattern: String, options: MatchOptions): Paths {
         dirPatterns = dirPatterns,
         requireDir = requireDir,
         options = options,
-        todo = ArrayDeque(),
+        workQueue = ArrayDeque(),
         scope = scopeWrap,
     )
 }
@@ -272,7 +268,7 @@ class GlobError internal constructor(
  * Lightweight wrapper bundling a path with whether it points at a directory,
  * so the iterator does not have to re-stat the same path repeatedly.
  *
- * Internal to mirror Rust's private `PathWrapper` struct.
+ * Internal wrapper around a path string and its directory bit.
  */
 internal class PathWrapper internal constructor(
     val path: String,
@@ -281,9 +277,8 @@ internal class PathWrapper internal constructor(
     companion object {
         /**
          * Builds a wrapper from a directory listing entry. If the entry is a
-         * symlink the directory bit is resolved by stat'ing the target path
-         * (matching Rust's `from_dir_entry` semantics that fall back to
-         * `fs::metadata` on symlinks rather than trusting `file_type()`).
+         * symlink, the directory bit is resolved from the target path's
+         * metadata.
          */
         fun fromDirChild(fullPath: String, childIsDirectory: Boolean, childIsSymlink: Boolean): PathWrapper {
             val resolvedIsDir = if (childIsSymlink) {
@@ -306,9 +301,8 @@ internal class PathWrapper internal constructor(
  * A glob iteration result.
  *
  * This represents either a matched path or a glob iteration error, such as
- * failing to read a particular directory's contents. Mirrors Rust's
- * `pub type GlobResult = Result<PathBuf, GlobError>;` via a sealed result so
- * the error data is reachable without unwrapping a generic `Result`.
+ * failing to read a particular directory's contents. A sealed result keeps the
+ * path and error cases explicit on every target.
  */
 sealed class GlobResult {
     /** The pattern matched [path]. */
@@ -320,9 +314,8 @@ sealed class GlobResult {
 
 /**
  * Single entry pushed into [Paths]'s pending-work buffer. Either a
- * `(path, pattern-index)` pair to inspect, or an [error] that should be
- * surfaced through the iterator. Mirrors Rust's
- * `Result<(PathWrapper, usize), GlobError>` element type.
+ * path and pattern-index pair to inspect, or an [error] that should be
+ * surfaced through the iterator.
  */
 internal class TodoItem private constructor(
     val path: PathWrapper?,
@@ -337,8 +330,7 @@ internal class TodoItem private constructor(
 
 /**
  * Joins [child] onto [parent] using a forward slash unless [parent] already
- * ends with a separator. Used in place of Rust's `Path::join`, which is
- * platform-aware but converges to the same shape for glob's path strings.
+ * ends with a separator.
  */
 internal fun pathJoin(parent: String, child: String): String {
     if (parent.isEmpty()) return child
@@ -349,8 +341,6 @@ internal fun pathJoin(parent: String, child: String): String {
 /**
  * Returns the last path component of [path], or `null` if the path has none
  * (e.g. it is empty or ends in a trailing separator with nothing after).
- * Equivalent to Rust's `Path::file_name`, but operating on `String` rather
- * than the OS-typed `Path`.
  */
 internal fun pathFileName(path: String): String? {
     if (path.isEmpty()) return null
@@ -701,7 +691,7 @@ class Pattern private constructor(
             return escaped.toString()
         }
 
-        /** Default empty pattern. Mirrors Rust `Default` for the `Pattern` type. */
+        /** Default empty pattern for the [Pattern] type. */
         fun default(): Pattern = Pattern(
             original = "",
             tokens = emptyList(),
@@ -718,11 +708,11 @@ class Pattern private constructor(
     }
 }
 
-// Fills [todo] with paths under [path] to be matched by `patterns[idx]`,
+// Fills [workQueue] with paths under [path] to be matched by `patterns[idx]`,
 // special-casing patterns to match `.` and `..`, and avoiding directory
 // listing when there are no metacharacters in the pattern.
 internal fun fillTodo(
-    todo: ArrayDeque<TodoItem>,
+    workQueue: ArrayDeque<TodoItem>,
     patterns: List<Pattern>,
     idx: Int,
     path: PathWrapper,
@@ -733,9 +723,9 @@ internal fun fillTodo(
             // We know it's good, so don't make the iterator match this path
             // against the pattern again. In particular, it can't match
             // . or .. globs since these never show up as path components.
-            todo.addLast(TodoItem.ofPair(nextPath, Int.MAX_VALUE))
+            workQueue.addLast(TodoItem.ofPair(nextPath, Int.MAX_VALUE))
         } else {
-            fillTodo(todo, patterns, idx + 1, nextPath, options)
+            fillTodo(workQueue, patterns, idx + 1, nextPath, options)
         }
     }
 
@@ -764,7 +754,7 @@ internal fun fillTodo(
         }
         isDir -> {
             // List the directory; if it fails (permissions etc.) surface the
-            // error through the todo buffer just like Rust does.
+            // error through the work queue.
             val children: MutableList<PathWrapper> = try {
                 SystemFileSystem.list(KxPath(path.path)).mapNotNull { childPath ->
                     val name = childPath.name
@@ -774,11 +764,11 @@ internal fun fillTodo(
                     val childIsDir = md?.isDirectory ?: false
                     // km-io has no symlink discriminator on FileMetadata, so we
                     // treat the metadata bit as authoritative for the directory
-                    // check — matching Rust's fallback `fs::metadata` path.
+                    // check, matching the fallback metadata path.
                     PathWrapper(fullPath, childIsDir)
                 }.toMutableList()
             } catch (e: Throwable) {
-                todo.addLast(TodoItem.ofError(GlobError(path.path, e)))
+                workQueue.addLast(TodoItem.ofError(GlobError(path.path, e)))
                 return
             }
 
@@ -786,12 +776,10 @@ internal fun fillTodo(
                 children.removeAll { (pathFileName(it.path) ?: "").startsWith('.') }
             }
             // Sort descending by file name so subsequent removeLast() yields
-            // children in ascending alphabetical order, matching the upstream
-            // `children.sort_by(|p1, p2| p2.file_name().cmp(&p1.file_name()))`
-            // plus `Vec::pop` ordering.
+            // children in ascending alphabetical order.
             children.sortByDescending { pathFileName(it.path) ?: "" }
             for (child in children) {
-                todo.addLast(TodoItem.ofPair(child, idx))
+                workQueue.addLast(TodoItem.ofPair(child, idx))
             }
 
             // Matching the special directory entries . and .. that
