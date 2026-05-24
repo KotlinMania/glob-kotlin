@@ -17,7 +17,7 @@ name: "CodeQL Advanced"
 # for that language:
 #
 #   1. JDK + Gradle setup (the other two languages need no toolchain).
-#   2. A direct `./gradlew codeqlCompileJvm` invocation under
+#   2. A direct `./gradlew setupAndroidSdk codeqlCompileJvm` invocation under
 #      JAVA_TOOL_OPTIONS=-javaagent:codeql-java-agent.jar=java,kotlin.
 #
 # `codeqlCompileJvm` is a JavaExec task in build.gradle.kts that runs
@@ -104,7 +104,7 @@ jobs:
         run: |
           export JAVA_TOOL_OPTIONS="-javaagent:${CODEQL_EXTRACTOR_JAVA_ROOT}/tools/codeql-java-agent.jar=java,kotlin"
           echo "JAVA_TOOL_OPTIONS=${JAVA_TOOL_OPTIONS}"
-          ./gradlew --no-daemon codeqlCompileJvm --no-configuration-cache
+          ./gradlew --no-daemon setupAndroidSdk codeqlCompileJvm --no-configuration-cache
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
