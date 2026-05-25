@@ -1,4 +1,6 @@
 // port-lint: source lib.rs
+@file:OptIn(kotlin.experimental.ExperimentalObjCRefinement::class)
+
 // Copyright 2014 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
@@ -23,6 +25,7 @@ package io.github.kotlinmania.glob
 
 import io.github.kotlinmania.io.files.Path as KxPath
 import io.github.kotlinmania.io.files.SystemFileSystem
+import kotlin.native.HiddenFromObjC
 
 /**
  * Returns whether [c] is a path component separator. Both `/` (Unix) and `\`
@@ -249,6 +252,7 @@ fun globWith(pattern: String, options: MatchOptions): Paths {
  * to determine if its contents match the glob pattern. This is possible
  * if the program lacks the appropriate permissions, for example.
  */
+@HiddenFromObjC
 class GlobError internal constructor(
     private val pathStr: String,
     private val ioError: Throwable,
@@ -354,6 +358,7 @@ internal fun pathFileName(path: String): String? {
 }
 
 /** A pattern parsing error. */
+@HiddenFromObjC
 class PatternError(
     /** The approximate character index of where the error occurred. */
     val pos: Int,
