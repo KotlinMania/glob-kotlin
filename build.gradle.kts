@@ -28,7 +28,7 @@ plugins {
 }
 
 group = "io.github.kotlinmania"
-version = "0.1.1"
+version = "0.1.2"
 
 val androidCommandLineToolsRevision = "14742923"
 val projectCompileSdk = "34"
@@ -299,10 +299,8 @@ kotlin {
                 // for the Paths iterator and fillTodo walker). km-io is the
                 // kotlinmania fork of kotlinx-io that publishes for the full
                 // 22-target matrix (the upstream tree omits the AGP `android`
-                // target). Built locally via publishToMavenLocal out of
-                // /Volumes/stuff/Projects/kotlinmania/km-io until it's
-                // released to Maven Central.
-                implementation("io.github.kotlinmania:km-io-core:0.1.1")
+                // target).
+                implementation("io.github.kotlinmania:km-io:0.1.5")
             }
         }
         val commonTest by getting {
@@ -460,7 +458,7 @@ dependencies {
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.11.0")
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-datetime-jvm:0.8.0")
     codeqlSourceClasspath("org.jetbrains.kotlinx:kotlinx-collections-immutable-jvm:0.4.0")
-    codeqlSourceClasspath("io.github.kotlinmania:km-io-core-jvm:0.1.1")
+    codeqlSourceClasspath("io.github.kotlinmania:km-io-jvm:0.1.5")
 }
 
 val codeqlCompileJvm = tasks.register<JavaExec>("codeqlCompileJvm") {
@@ -547,10 +545,40 @@ tasks.register("setupAndroidSdk") {
     }
 }
 
+val swiftExportOutputDir = layout.buildDirectory.dir("swift-test").get().asFile
+val buildSwiftExportPackage = tasks.register<Exec>("buildSwiftExportPackage") {
+    group = "verification"
+    description = "Builds the Swift Export SPM package with the same environment used by CI."
+    workingDir = layout.projectDirectory.asFile
+    commandLine(
+        layout.projectDirectory.file(if (isWindowsHost) "gradlew.bat" else "gradlew").asFile.absolutePath,
+        "embedSwiftExportForXcode",
+        "--no-daemon",
+        "--console=plain",
+        "--no-configuration-cache",
+    )
+    environment("BUILT_PRODUCTS_DIR", swiftExportOutputDir.absolutePath)
+    environment("TARGET_BUILD_DIR", swiftExportOutputDir.absolutePath)
+    environment("SDK_NAME", "macosx")
+    environment("CONFIGURATION", "Debug")
+    environment("ARCHS", "arm64")
+    environment("FRAMEWORKS_FOLDER_PATH", "Frameworks")
+    environment("MACOSX_DEPLOYMENT_TARGET", "14.0")
+    environment("DEPLOYMENT_TARGET_SETTING_NAME", "MACOSX_DEPLOYMENT_TARGET")
+}
+
+val swiftExportTest = tasks.register<Exec>("swiftExportTest") {
+    group = "verification"
+    description = "Runs swift test against the Kotlin-generated Swift Export package."
+    dependsOn(buildSwiftExportPackage)
+    workingDir = layout.projectDirectory.dir("swift-test-harness").asFile
+    commandLine("swift", "test")
+}
+
 tasks.register("test") {
     group = "verification"
     description =
-        "Runs the host-portable test suite (macOS + JS + WasmJS + Android unit). " +
+        "Runs the host-portable test suite plus the Swift Export smoke test. " +
         "Non-host native targets (mingwX64, linuxX64) only run on their own host."
 
     val defaultTestTasks = listOf(
@@ -563,6 +591,11 @@ tasks.register("test") {
     )
 
     dependsOn(defaultTestTasks.mapNotNull { taskName -> tasks.findByName(taskName) })
+    dependsOn(swiftExportTest)
+}
+
+tasks.named("check") {
+    dependsOn(swiftExportTest)
 }
 
 val jsYarnLockBuildTasks = listOf(
