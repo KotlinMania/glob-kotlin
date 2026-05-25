@@ -65,7 +65,7 @@ for entry in glob("/media/**/*.jpg").expect("Failed to read glob pattern") {
 
 ```kotlin
 dependencies {
-    implementation("io.github.kotlinmania:glob-kotlin:0.1.0")
+    implementation("io.github.kotlinmania:glob-kotlin:0.1.1")
 }
 ```
 
