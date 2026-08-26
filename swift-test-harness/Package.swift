@@ -3,6 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftTestHarness",
+    platforms: [
+        .macOS(.v14),
+    ],
     dependencies: [
         .package(name: "Glob", path: "../build/SPMPackage/macosArm64/Debug")
     ],
