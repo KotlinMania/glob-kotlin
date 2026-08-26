@@ -330,12 +330,36 @@ tasks
         dependsOn(ensureAndroidSdk)
     }
 
-// Gap #9b: KGP-generated bridge boilerplate and KotlinCoroutineSupport runtime
-// produce warnings (unchecked casts, unused expressions, opt-in requirements)
-// that cannot be fixed in source — they are regenerated every build.
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     if (name.startsWith("compileSwiftExport")) {
         compilerOptions.allWarningsAsErrors.set(false)
+        compilerOptions.freeCompilerArgs.addAll(
+            "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
+            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+        )
+    }
+}
+
+tasks.matching { it.name.contains("GenerateSPMPackage") || it.name.contains("BuildSPMPackage") }.configureEach {
+    doLast {
+        val spmDir = layout.buildDirectory.dir("SPMPackage/macosArm64/Debug").get().asFile
+        val coroutinesSwift = File(spmDir, "Sources/OrgJetbrainsKotlinxKotlinxCoroutinesCore/OrgJetbrainsKotlinxKotlinxCoroutinesCore.swift")
+        if (coroutinesSwift.exists()) {
+            var text = coroutinesSwift.readText()
+            if (!text.contains("typealias OnCancellationConstructor =")) {
+                text = text.replace(
+                    "extension ExportedKotlinPackages.kotlinx.coroutines.selects {",
+                    "extension ExportedKotlinPackages.kotlinx.coroutines.selects {\n    public typealias OnCancellationConstructor = (ExportedKotlinPackages.kotlin.Throwable, (any KotlinRuntimeSupport._KotlinBridgeable)?, any ExportedKotlinPackages.kotlin.coroutines.CoroutineContext) -> Swift.Void",
+                )
+            }
+            val patched = text.replace(
+                "return { (arg0: Swift.Bool) in return { originalBlock({ arg0; return () }()); return true }() }",
+                "return { (arg0: Swift.Bool) in return { originalBlock(()); return true }() }",
+            )
+            if (patched != text) {
+                coroutinesSwift.writeText(patched)
+            }
+        }
     }
 }
 
@@ -460,16 +484,9 @@ kotlin {
         nodejs()
     }
 
-    // Swift Export bridge — Experimental per Kotlin 2.4.0 release notes.
-    // KGP 2.4.0 does not expose a public opt-in annotation; warnings (if any)
-    // arrive via KotlinToolingDiagnostics, not @RequiresOptIn.
     swiftExport {
         moduleName = frameworkName
         flattenPackage = projectNamespace
-        @OptIn(org.jetbrains.kotlin.gradle.swiftexport.ExperimentalSwiftExportDsl::class)
-        configure {
-            settings.put("enableCoroutinesSupport", "true")
-        }
     }
 
     // Android KMP library. Block name is `android` — `androidLibrary` is deprecated in current KGP.
@@ -885,8 +902,7 @@ val publishToCentralPortal by tasks.registering {
 tasks.register("test") {
     group = "verification"
     description = "Runs the commonTest-backed KMP suite, Android host tests, and Swift Export smoke test."
-    dependsOn("allTests")
-    dependsOn("testAndroidHostTest")
+    dependsOn("hostTests")
     dependsOn("swiftExportSmokeTest")
 }
 
@@ -924,18 +940,21 @@ tasks.register("swiftExportSmokeTest") {
 
     doLast {
         val execOperations = serviceOf<ExecOperations>()
-        val swiftBuildDir =
+        val swiftBuildDirFile =
             layout.buildDirectory
                 .dir("swift-test")
                 .get()
                 .asFile
-                .absolutePath
+        swiftBuildDirFile.deleteRecursively()
+        swiftBuildDirFile.mkdirs()
+        val swiftBuildDir = swiftBuildDirFile.absolutePath
         execOperations
             .exec {
                 workingDir = projectDir
                 commandLine(
                     "./gradlew",
                     "embedSwiftExportForXcode",
+                    "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g",
                     "--no-configuration-cache",
                     "--no-daemon",
                     "--console=plain",
@@ -965,9 +984,31 @@ tasks.register("swiftExportSmokeTest") {
                 generatedPackageSwift.writeText(
                     text.replaceFirst(
                         Regex("(name:\\s*\"[^\"]*\",)"),
-                        "\$1\n    platforms: [.macOS(.v14)],",
+                        "$1\n    platforms: [.macOS(.v14)],",
                     ),
                 )
+            }
+        }
+
+        val coroutinesSwift =
+            layout.buildDirectory
+                .file("SPMPackage/macosArm64/Debug/Sources/OrgJetbrainsKotlinxKotlinxCoroutinesCore/OrgJetbrainsKotlinxKotlinxCoroutinesCore.swift")
+                .get()
+                .asFile
+        if (coroutinesSwift.exists()) {
+            var text = coroutinesSwift.readText()
+            if (!text.contains("typealias OnCancellationConstructor =")) {
+                text = text.replace(
+                    "extension ExportedKotlinPackages.kotlinx.coroutines.selects {",
+                    "extension ExportedKotlinPackages.kotlinx.coroutines.selects {\n    public typealias OnCancellationConstructor = (ExportedKotlinPackages.kotlin.Throwable, (any KotlinRuntimeSupport._KotlinBridgeable)?, any ExportedKotlinPackages.kotlin.coroutines.CoroutineContext) -> Swift.Void",
+                )
+            }
+            val patched = text.replace(
+                "return { (arg0: Swift.Bool) in return { originalBlock({ arg0; return () }()); return true }() }",
+                "return { (arg0: Swift.Bool) in return { originalBlock(()); return true }() }",
+            )
+            if (patched != text) {
+                coroutinesSwift.writeText(patched)
             }
         }
 
