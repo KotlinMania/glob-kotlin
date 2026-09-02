@@ -337,4 +337,46 @@ class LibTest {
             assertFalse(f(optionsRequireLiteralLeadingDot))
         }
     }
+
+    @Test
+    fun testPatternFromStr() {
+        assertTrue(Pattern.new("a*b").matches("a_b"))
+        assertEquals(4, (assertFails { Pattern.new("a/**b") } as PatternError).pos)
+    }
+
+    @Test
+    fun testGlobErrors() {
+        assertEquals(4, (assertFails { glob("a/**b") } as PatternError).pos)
+        assertEquals(3, (assertFails { glob("abc[def") } as PatternError).pos)
+    }
+
+    @Test
+    fun testMatchesPath() {
+        assertTrue(Pattern.new("a/b").matchesPath("a/b"))
+    }
+
+    @Test
+    fun testPathJoin() {
+        val pattern = pathJoin("one", "**/*.rs")
+        assertTrue(Pattern.new(pattern).tokens.isNotEmpty())
+    }
+
+    @Test
+    fun testAbsolutePattern() {
+        val iter = glob("/")
+        if (iter.hasNext()) {
+            iter.next()
+        }
+    }
+
+    @Test
+    fun testLotsOfFiles() {
+        // touches files with deep pattern
+        val iter = glob("/*/*/*/*")
+        if (iter.hasNext()) {
+            iter.next()
+        }
+    }
 }
+
+

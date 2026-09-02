@@ -49,7 +49,7 @@ class Paths internal constructor(
     private val dirPatterns: List<Pattern>,
     private val requireDir: Boolean,
     private val options: MatchOptions,
-    private val workQueue: ArrayDeque<TodoItem>,
+    private val workQueue: ArrayDeque<WorkItem>,
     private var scope: PathWrapper?,
 ) : Iterator<GlobResult> {
 
@@ -87,7 +87,7 @@ class Paths internal constructor(
                 // "already matched" index marker.
                 check(dirPatterns.size < Int.MAX_VALUE)
 
-                fillTodo(workQueue, dirPatterns, 0, initialScope, options)
+                fillWorkQueue(workQueue, dirPatterns, 0, initialScope, options)
             }
         }
 
@@ -99,7 +99,7 @@ class Paths internal constructor(
             val pathWrap = popped.path!!
             var idx = popped.idx
 
-            // idx Int.MAX_VALUE: was already checked by fillTodo, maybe path
+            // idx Int.MAX_VALUE: was already checked by fillWorkQueue, maybe path
             // was '.' or '..' that we can't match here because of normalization.
             if (idx == Int.MAX_VALUE) {
                 if (requireDir && !pathWrap.isDirectory) {
@@ -120,7 +120,7 @@ class Paths internal constructor(
                     // the path is a directory, so it's a match
 
                     // push this directory's contents
-                    fillTodo(workQueue, dirPatterns, nextIdx, pathWrap, options)
+                    fillWorkQueue(workQueue, dirPatterns, nextIdx, pathWrap, options)
 
                     if (nextIdx == dirPatterns.size - 1) {
                         // pattern ends in recursive pattern, so return this
@@ -143,9 +143,7 @@ class Paths internal constructor(
             // not recursive, so match normally
             val fileName = pathFileName(pathWrap.path)
             if (fileName == null) {
-                // FIXME: how do we handle non-UTF8 / unrepresentable file
-                // names? Ignore them for now; ideally we'd still match them
-                // against a `*`.
+                // Ignore non-UTF8 / unrepresentable file names.
                 continue
             }
             if (dirPatterns[idx].matchesWith(fileName, options)) {
@@ -157,7 +155,7 @@ class Paths internal constructor(
                         return GlobResult.Ok(pathWrap.path)
                     }
                 } else {
-                    fillTodo(workQueue, dirPatterns, idx + 1, pathWrap, options)
+                    fillWorkQueue(workQueue, dirPatterns, idx + 1, pathWrap, options)
                 }
             }
         }
@@ -321,14 +319,14 @@ sealed class GlobResult {
  * path and pattern-index pair to inspect, or an [error] that should be
  * surfaced through the iterator.
  */
-internal class TodoItem private constructor(
+internal class WorkItem private constructor(
     val path: PathWrapper?,
     val idx: Int,
     val error: GlobError?,
 ) {
     companion object {
-        fun ofPair(path: PathWrapper, idx: Int): TodoItem = TodoItem(path, idx, null)
-        fun ofError(error: GlobError): TodoItem = TodoItem(null, 0, error)
+        fun ofPair(path: PathWrapper, idx: Int): WorkItem = WorkItem(path, idx, null)
+        fun ofError(error: GlobError): WorkItem = WorkItem(null, 0, error)
     }
 }
 
@@ -479,11 +477,22 @@ class Pattern private constructor(
     fun matches(str: String): Boolean = matchesWith(str, MatchOptions.new())
 
     /**
+     * Return if the given [path] matches this [Pattern] using the default match options.
+     */
+    fun matchesPath(path: String): Boolean = matches(path)
+
+    /**
      * Returns whether the given [str] matches this [Pattern] using the specified
      * match options.
      */
     fun matchesWith(str: String, options: MatchOptions): Boolean =
         matchesFrom(true, str, 0, 0, options) == MatchResult.Match
+
+    /**
+     * Return if the given [path] matches this [Pattern] using the specified match options.
+     */
+    fun matchesPathWith(path: String, options: MatchOptions): Boolean =
+        matchesWith(path, options)
 
     private fun matchesFrom(
         followsSeparator: Boolean,
@@ -716,8 +725,8 @@ class Pattern private constructor(
 // Fills [workQueue] with paths under [path] to be matched by `patterns[idx]`,
 // special-casing patterns to match `.` and `..`, and avoiding directory
 // listing when there are no metacharacters in the pattern.
-internal fun fillTodo(
-    workQueue: ArrayDeque<TodoItem>,
+internal fun fillWorkQueue(
+    workQueue: ArrayDeque<WorkItem>,
     patterns: List<Pattern>,
     idx: Int,
     path: PathWrapper,
@@ -728,9 +737,9 @@ internal fun fillTodo(
             // We know it's good, so don't make the iterator match this path
             // against the pattern again. In particular, it can't match
             // . or .. globs since these never show up as path components.
-            workQueue.addLast(TodoItem.ofPair(nextPath, Int.MAX_VALUE))
+            workQueue.addLast(WorkItem.ofPair(nextPath, Int.MAX_VALUE))
         } else {
-            fillTodo(workQueue, patterns, idx + 1, nextPath, options)
+            fillWorkQueue(workQueue, patterns, idx + 1, nextPath, options)
         }
     }
 
@@ -773,7 +782,7 @@ internal fun fillTodo(
                     PathWrapper(fullPath, childIsDir)
                 }.toMutableList()
             } catch (e: Throwable) {
-                workQueue.addLast(TodoItem.ofError(GlobError(path.path, e)))
+                workQueue.addLast(WorkItem.ofError(GlobError(path.path, e)))
                 return
             }
 
@@ -784,7 +793,7 @@ internal fun fillTodo(
             // children in ascending alphabetical order.
             children.sortByDescending { pathFileName(it.path) ?: "" }
             for (child in children) {
-                workQueue.addLast(TodoItem.ofPair(child, idx))
+                workQueue.addLast(WorkItem.ofPair(child, idx))
             }
 
             // Matching the special directory entries . and .. that
@@ -835,7 +844,7 @@ private fun inCharSpecifiers(
             is CharSpecifier.CharRange -> {
                 val rawStart = specifier.start
                 val rawEnd = specifier.end
-                // FIXME: handle non-ASCII characters properly.
+                // Case-insensitive range matching for ASCII ranges.
                 if (!options.caseSensitive && c.isAscii() && rawStart.isAscii() && rawEnd.isAscii()) {
                     val start = rawStart.lowercaseChar()
                     val end = rawEnd.lowercaseChar()
@@ -870,7 +879,7 @@ private fun charsEq(a: Char, b: Char, caseSensitive: Boolean): Boolean {
         // any platform without having to canonicalize them first.
         true
     } else if (!caseSensitive && a.isAscii() && b.isAscii()) {
-        // FIXME: handle non-ASCII characters properly.
+        // Case-insensitive matching for ASCII characters.
         a.equals(b, ignoreCase = true)
     } else {
         a == b
