@@ -499,20 +499,19 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(commonMainDependencyBundle)
-        }
-        commonTest.dependencies {
-            implementation(kotlin("test"))
-            commonTestDependencyBundle?.let { implementation(it) }
-        }
-        if (benchmarkEnabled) {
-            val commonBenchmark = maybeCreate("commonBenchmark")
-            commonBenchmark.dependencies {
-                implementation(commonBenchmarkDependencyBundle!!)
-            }
-            benchmarkTargetNames.forEach { targetName ->
-                findByName("${targetName}Benchmark")?.dependsOn(commonBenchmark)
+        val commonMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.11.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
+                // Multiplatform filesystem (replaces Rust std::fs::read_dir/metadata
+                // for the Paths iterator and fillTodo walker). km-io is the
+                // kotlinmania fork of kotlinx-io that publishes for the full
+                // 22-target matrix (the upstream tree omits the AGP `android`
+                // target).
+                implementation("io.github.kotlinmania:km-io-core:0.1.0")
             }
         }
     }
