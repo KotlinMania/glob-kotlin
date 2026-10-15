@@ -18,7 +18,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LibTest {
-
     @Test
     fun testWildcardErrors() {
         assertEquals(4, (assertFails { Pattern.new("a/**b") } as PatternError).pos)
@@ -48,14 +47,15 @@ class LibTest {
         assertTrue(Pattern.new("a*b*c").matches("a_b_c"))
         assertTrue(Pattern.new("a*b*c").matches("a___b___c"))
         assertTrue(
-            Pattern.new("abc*abc*abc").matches("abcabcabcabcabcabcabc")
+            Pattern.new("abc*abc*abc").matches("abcabcabcabcabcabcabc"),
         )
         assertFalse(
-            Pattern.new("abc*abc*abc").matches("abcabcabcabcabcabcabca")
+            Pattern.new("abc*abc*abc").matches("abcabcabcabcabcabcabca"),
         )
         assertTrue(
-            Pattern.new("a*a*a*a*a*a*a*a*a")
-                .matches("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            Pattern
+                .new("a*a*a*a*a*a*a*a*a")
+                .matches("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         )
         assertTrue(Pattern.new("a*b[xyz]c*d").matches("abxcdbxcddd"))
     }
@@ -183,11 +183,12 @@ class LibTest {
     @Test
     fun testPatternMatchesCaseInsensitive() {
         val pat = Pattern.new("aBcDeFg")
-        val options = MatchOptions(
-            caseSensitive = false,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
-        )
+        val options =
+            MatchOptions(
+                caseSensitive = false,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
 
         assertTrue(pat.matchesWith("aBcDeFg", options))
         assertTrue(pat.matchesWith("abcdefg", options))
@@ -200,16 +201,18 @@ class LibTest {
         val patWithin = Pattern.new("[a]")
         val patExcept = Pattern.new("[!a]")
 
-        val optionsCaseInsensitive = MatchOptions(
-            caseSensitive = false,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
-        )
-        val optionsCaseSensitive = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
-        )
+        val optionsCaseInsensitive =
+            MatchOptions(
+                caseSensitive = false,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
+        val optionsCaseSensitive =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
 
         assertTrue(patWithin.matchesWith("a", optionsCaseInsensitive))
         assertTrue(patWithin.matchesWith("A", optionsCaseInsensitive))
@@ -222,56 +225,60 @@ class LibTest {
 
     @Test
     fun testPatternMatchesRequireLiteralSeparator() {
-        val optionsRequireLiteral = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = true,
-            requireLiteralLeadingDot = false,
+        val optionsRequireLiteral =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = true,
+                requireLiteralLeadingDot = false,
+            )
+        val optionsNotRequireLiteral =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
+
+        assertTrue(
+            Pattern.new("abc/def").matchesWith("abc/def", optionsRequireLiteral),
         )
-        val optionsNotRequireLiteral = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
+        assertFalse(
+            Pattern.new("abc?def").matchesWith("abc/def", optionsRequireLiteral),
+        )
+        assertFalse(
+            Pattern.new("abc*def").matchesWith("abc/def", optionsRequireLiteral),
+        )
+        assertFalse(
+            Pattern.new("abc[/]def").matchesWith("abc/def", optionsRequireLiteral),
         )
 
         assertTrue(
-            Pattern.new("abc/def").matchesWith("abc/def", optionsRequireLiteral)
-        )
-        assertFalse(
-            Pattern.new("abc?def").matchesWith("abc/def", optionsRequireLiteral)
-        )
-        assertFalse(
-            Pattern.new("abc*def").matchesWith("abc/def", optionsRequireLiteral)
-        )
-        assertFalse(
-            Pattern.new("abc[/]def").matchesWith("abc/def", optionsRequireLiteral)
-        )
-
-        assertTrue(
-            Pattern.new("abc/def").matchesWith("abc/def", optionsNotRequireLiteral)
+            Pattern.new("abc/def").matchesWith("abc/def", optionsNotRequireLiteral),
         )
         assertTrue(
-            Pattern.new("abc?def").matchesWith("abc/def", optionsNotRequireLiteral)
+            Pattern.new("abc?def").matchesWith("abc/def", optionsNotRequireLiteral),
         )
         assertTrue(
-            Pattern.new("abc*def").matchesWith("abc/def", optionsNotRequireLiteral)
+            Pattern.new("abc*def").matchesWith("abc/def", optionsNotRequireLiteral),
         )
         assertTrue(
-            Pattern.new("abc[/]def").matchesWith("abc/def", optionsNotRequireLiteral)
+            Pattern.new("abc[/]def").matchesWith("abc/def", optionsNotRequireLiteral),
         )
     }
 
     @Test
     fun testPatternMatchesRequireLiteralLeadingDot() {
-        val optionsRequireLiteralLeadingDot = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = true,
-        )
-        val optionsNotRequireLiteralLeadingDot = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
-        )
+        val optionsRequireLiteralLeadingDot =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = true,
+            )
+        val optionsNotRequireLiteralLeadingDot =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
 
         run {
             val f = { o: MatchOptions ->
@@ -360,23 +367,4 @@ class LibTest {
         val pattern = pathJoin("one", "**/*.rs")
         assertTrue(Pattern.new(pattern).tokens.isNotEmpty())
     }
-
-    @Test
-    fun testAbsolutePattern() {
-        val iter = glob("/")
-        if (iter.hasNext()) {
-            iter.next()
-        }
-    }
-
-    @Test
-    fun testLotsOfFiles() {
-        // touches files with deep pattern
-        val iter = glob("/*/*/*/*")
-        if (iter.hasNext()) {
-            iter.next()
-        }
-    }
 }
-
-

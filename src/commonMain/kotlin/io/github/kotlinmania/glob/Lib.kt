@@ -21,11 +21,12 @@
  * For consistency across platforms, this module is implemented entirely in
  * Kotlin rather than deferring to the libc `glob`/`fnmatch` functions.
  */
+
 package io.github.kotlinmania.glob
 
-import io.github.kotlinmania.io.files.Path as KxPath
 import io.github.kotlinmania.io.files.SystemFileSystem
 import kotlin.native.HiddenFromObjC
+import io.github.kotlinmania.io.files.Path as KxPath
 
 /**
  * Returns whether [c] is a path component separator. Both `/` (Unix) and `\`
@@ -52,7 +53,6 @@ class Paths internal constructor(
     private val workQueue: ArrayDeque<WorkItem>,
     private var scope: PathWrapper?,
 ) : Iterator<GlobResult> {
-
     private var cached: GlobResult? = null
     private var exhausted: Boolean = false
 
@@ -255,7 +255,6 @@ class GlobError internal constructor(
     private val pathStr: String,
     private val ioError: Throwable,
 ) : Throwable("attempting to read `$pathStr` resulted in an error: ${ioError.message}") {
-
     /** The path that the error corresponds to. */
     fun path(): String = pathStr
 
@@ -283,11 +282,12 @@ internal class PathWrapper internal constructor(
          * metadata.
          */
         fun fromDirChild(fullPath: String, childIsDirectory: Boolean, childIsSymlink: Boolean): PathWrapper {
-            val resolvedIsDir = if (childIsSymlink) {
-                SystemFileSystem.metadataOrNull(KxPath(fullPath))?.isDirectory ?: false
-            } else {
-                childIsDirectory
-            }
+            val resolvedIsDir =
+                if (childIsSymlink) {
+                    SystemFileSystem.metadataOrNull(KxPath(fullPath))?.isDirectory ?: false
+                } else {
+                    childIsDirectory
+                }
             return PathWrapper(fullPath, resolvedIsDir)
         }
 
@@ -308,10 +308,14 @@ internal class PathWrapper internal constructor(
  */
 sealed class GlobResult {
     /** The pattern matched [path]. */
-    data class Ok(val path: String) : GlobResult()
+    data class Ok(
+        val path: String,
+    ) : GlobResult()
 
     /** An I/O error prevented determining whether the path matched. */
-    data class Err(val error: GlobError) : GlobResult()
+    data class Err(
+        val error: GlobError,
+    ) : GlobResult()
 }
 
 /**
@@ -326,6 +330,7 @@ internal class WorkItem private constructor(
 ) {
     companion object {
         fun ofPair(path: PathWrapper, idx: Int): WorkItem = WorkItem(path, idx, null)
+
         fun ofError(error: GlobError): WorkItem = WorkItem(null, 0, error)
     }
 }
@@ -365,17 +370,34 @@ class PatternError(
 ) : Throwable("Pattern syntax error near position $pos: $msg")
 
 internal sealed class PatternToken {
-    data class Char(val c: kotlin.Char) : PatternToken()
+    data class Char(
+        val c: kotlin.Char,
+    ) : PatternToken()
+
     object AnyChar : PatternToken()
+
     object AnySequence : PatternToken()
+
     object AnyRecursiveSequence : PatternToken()
-    data class AnyWithin(val specifiers: List<CharSpecifier>) : PatternToken()
-    data class AnyExcept(val specifiers: List<CharSpecifier>) : PatternToken()
+
+    data class AnyWithin(
+        val specifiers: List<CharSpecifier>,
+    ) : PatternToken()
+
+    data class AnyExcept(
+        val specifiers: List<CharSpecifier>,
+    ) : PatternToken()
 }
 
 internal sealed class CharSpecifier {
-    data class SingleChar(val c: Char) : CharSpecifier()
-    data class CharRange(val start: Char, val end: Char) : CharSpecifier()
+    data class SingleChar(
+        val c: Char,
+    ) : CharSpecifier()
+
+    data class CharRange(
+        val start: Char,
+        val end: Char,
+    ) : CharSpecifier()
 }
 
 private enum class MatchResult {
@@ -430,7 +452,6 @@ class Pattern private constructor(
      */
     internal val hasMetachars: Boolean,
 ) : Comparable<Pattern> {
-
     /** Show the original glob pattern. */
     override fun toString(): String = original
 
@@ -506,7 +527,8 @@ class Pattern private constructor(
         for ((ti, token) in tokens.subList(i, tokens.size).withIndex()) {
             when (token) {
                 PatternToken.AnySequence,
-                PatternToken.AnyRecursiveSequence -> {
+                PatternToken.AnyRecursiveSequence,
+                -> {
                     // ** must be at the start.
                     // Invariant: AnyRecursiveSequence implies followsSeparator.
 
@@ -539,27 +561,41 @@ class Pattern private constructor(
 
                     val isSep = isPathSeparator(c)
 
-                    val matched: Boolean = when (token) {
-                        PatternToken.AnyChar -> {
-                            if ((options.requireLiteralSeparator && isSep) ||
-                                (fs && options.requireLiteralLeadingDot && c == '.')
-                            ) false else true
+                    val matched: Boolean =
+                        when (token) {
+                            PatternToken.AnyChar -> {
+                                if ((options.requireLiteralSeparator && isSep) ||
+                                    (fs && options.requireLiteralLeadingDot && c == '.')
+                                ) {
+                                    false
+                                } else {
+                                    true
+                                }
+                            }
+                            is PatternToken.AnyWithin -> {
+                                if ((options.requireLiteralSeparator && isSep) ||
+                                    (fs && options.requireLiteralLeadingDot && c == '.')
+                                ) {
+                                    false
+                                } else {
+                                    inCharSpecifiers(token.specifiers, c, options)
+                                }
+                            }
+                            is PatternToken.AnyExcept -> {
+                                if ((options.requireLiteralSeparator && isSep) ||
+                                    (fs && options.requireLiteralLeadingDot && c == '.')
+                                ) {
+                                    false
+                                } else {
+                                    !inCharSpecifiers(token.specifiers, c, options)
+                                }
+                            }
+                            is PatternToken.Char -> charsEq(c, token.c, options.caseSensitive)
+                            PatternToken.AnySequence,
+                            PatternToken.AnyRecursiveSequence,
+                            ->
+                                error("unreachable")
                         }
-                        is PatternToken.AnyWithin -> {
-                            if ((options.requireLiteralSeparator && isSep) ||
-                                (fs && options.requireLiteralLeadingDot && c == '.')
-                            ) false else inCharSpecifiers(token.specifiers, c, options)
-                        }
-                        is PatternToken.AnyExcept -> {
-                            if ((options.requireLiteralSeparator && isSep) ||
-                                (fs && options.requireLiteralLeadingDot && c == '.')
-                            ) false else !inCharSpecifiers(token.specifiers, c, options)
-                        }
-                        is PatternToken.Char -> charsEq(c, token.c, options.caseSensitive)
-                        PatternToken.AnySequence,
-                        PatternToken.AnyRecursiveSequence ->
-                            error("unreachable")
-                    }
 
                     if (!matched) return MatchResult.SubPatternDoesntMatch
                     fs = isSep
@@ -608,23 +644,24 @@ class Pattern private constructor(
                                 // ** can only be an entire path component
                                 // i.e. a/**/b is valid, but a**/b or a/**b is not
                                 // invalid matches are treated literally
-                                val isValid: Boolean = if (i == 2 || isPathSeparator(chars[i - count - 1])) {
-                                    // it ends in a '/'
-                                    if (i < chars.size && isPathSeparator(chars[i])) {
-                                        i += 1
-                                        true
-                                    // or the pattern ends here
-                                    // this enables the existing globbing mechanism
-                                    } else if (i == chars.size) {
-                                        true
-                                    // `**` ends in non-separator
+                                val isValid: Boolean =
+                                    if (i == 2 || isPathSeparator(chars[i - count - 1])) {
+                                        // it ends in a '/'
+                                        if (i < chars.size && isPathSeparator(chars[i])) {
+                                            i += 1
+                                            true
+                                            // or the pattern ends here
+                                            // this enables the existing globbing mechanism
+                                        } else if (i == chars.size) {
+                                            true
+                                            // `**` ends in non-separator
+                                        } else {
+                                            throw PatternError(pos = i, msg = ERROR_RECURSIVE_WILDCARDS)
+                                        }
+                                        // `**` begins with non-separator
                                     } else {
-                                        throw PatternError(pos = i, msg = ERROR_RECURSIVE_WILDCARDS)
+                                        throw PatternError(pos = old - 1, msg = ERROR_RECURSIVE_WILDCARDS)
                                     }
-                                // `**` begins with non-separator
-                                } else {
-                                    throw PatternError(pos = old - 1, msg = ERROR_RECURSIVE_WILDCARDS)
-                                }
 
                                 if (isValid) {
                                     // collapse consecutive AnyRecursiveSequence to a
@@ -632,8 +669,10 @@ class Pattern private constructor(
 
                                     val tokensLen = tokens.size
 
-                                    if (!(tokensLen > 1 &&
-                                            tokens[tokensLen - 1] == PatternToken.AnyRecursiveSequence)
+                                    if (!(
+                                            tokensLen > 1 &&
+                                                tokens[tokensLen - 1] == PatternToken.AnyRecursiveSequence
+                                        )
                                     ) {
                                         isRecursive = true
                                         tokens.add(PatternToken.AnyRecursiveSequence)
@@ -706,12 +745,13 @@ class Pattern private constructor(
         }
 
         /** Default empty pattern for the [Pattern] type. */
-        fun default(): Pattern = Pattern(
-            original = "",
-            tokens = emptyList(),
-            isRecursive = false,
-            hasMetachars = false,
-        )
+        fun default(): Pattern =
+            Pattern(
+                original = "",
+                tokens = emptyList(),
+                isRecursive = false,
+                hasMetachars = false,
+            )
 
         private fun indexOf(chars: CharArray, from: Int, needle: Char): Int? {
             for (k in from until chars.size) {
@@ -769,22 +809,25 @@ internal fun fillWorkQueue(
         isDir -> {
             // List the directory; if it fails (permissions etc.) surface the
             // error through the work queue.
-            val children: MutableList<PathWrapper> = try {
-                SystemFileSystem.list(KxPath(path.path)).mapNotNull { childPath ->
-                    val name = childPath.name
-                    if (name.isEmpty()) return@mapNotNull null
-                    val fullPath = if (curdir) name else pathJoin(path.path, name)
-                    val md = SystemFileSystem.metadataOrNull(childPath)
-                    val childIsDir = md?.isDirectory ?: false
-                    // km-io has no symlink discriminator on FileMetadata, so we
-                    // treat the metadata bit as authoritative for the directory
-                    // check, matching the fallback metadata path.
-                    PathWrapper(fullPath, childIsDir)
-                }.toMutableList()
-            } catch (e: Throwable) {
-                workQueue.addLast(WorkItem.ofError(GlobError(path.path, e)))
-                return
-            }
+            val children: MutableList<PathWrapper> =
+                try {
+                    SystemFileSystem
+                        .list(KxPath(path.path))
+                        .mapNotNull { childPath ->
+                            val name = childPath.name
+                            if (name.isEmpty()) return@mapNotNull null
+                            val fullPath = if (curdir) name else pathJoin(path.path, name)
+                            val md = SystemFileSystem.metadataOrNull(childPath)
+                            val childIsDir = md?.isDirectory ?: false
+                            // km-io has no symlink discriminator on FileMetadata, so we
+                            // treat the metadata bit as authoritative for the directory
+                            // check, matching the fallback metadata path.
+                            PathWrapper(fullPath, childIsDir)
+                        }.toMutableList()
+                } catch (e: Throwable) {
+                    workQueue.addLast(WorkItem.ofError(GlobError(path.path, e)))
+                    return
+                }
 
             if (options.requireLiteralLeadingDot) {
                 children.removeAll { (pathFileName(it.path) ?: "").startsWith('.') }
@@ -873,8 +916,8 @@ private fun inCharSpecifiers(
 }
 
 /** A helper function to determine if two chars are (possibly case-insensitively) equal. */
-private fun charsEq(a: Char, b: Char, caseSensitive: Boolean): Boolean {
-    return if (isPathSeparator(a) && isPathSeparator(b)) {
+private fun charsEq(a: Char, b: Char, caseSensitive: Boolean): Boolean =
+    if (isPathSeparator(a) && isPathSeparator(b)) {
         // Treat `/` and `\` as interchangeable so patterns match path strings on
         // any platform without having to canonicalize them first.
         true
@@ -884,7 +927,6 @@ private fun charsEq(a: Char, b: Char, caseSensitive: Boolean): Boolean {
     } else {
         a == b
     }
-}
 
 private fun Char.isAscii(): Boolean = this.code < 0x80
 
@@ -897,14 +939,12 @@ data class MatchOptions(
      * Unicode.
      */
     val caseSensitive: Boolean = false,
-
     /**
      * Whether or not path-component separator characters (e.g. `/` on
      * Posix) must be matched by a literal `/`, rather than by `*` or `?` or
      * `[...]`.
      */
     val requireLiteralSeparator: Boolean = false,
-
     /**
      * Whether or not paths that contain components that start with a `.`
      * will require that `.` appears literally in the pattern; `*`, `?`, `**`,
@@ -914,7 +954,6 @@ data class MatchOptions(
      */
     val requireLiteralLeadingDot: Boolean = false,
 ) : Comparable<MatchOptions> {
-
     override fun compareTo(other: MatchOptions): Int {
         var c = caseSensitive.compareTo(other.caseSensitive)
         if (c != 0) return c
@@ -944,10 +983,11 @@ data class MatchOptions(
          * constructor's: this returns `caseSensitive` as `true` while the default
          * constructor uses `false`.
          */
-        fun new(): MatchOptions = MatchOptions(
-            caseSensitive = true,
-            requireLiteralSeparator = false,
-            requireLiteralLeadingDot = false,
-        )
+        fun new(): MatchOptions =
+            MatchOptions(
+                caseSensitive = true,
+                requireLiteralSeparator = false,
+                requireLiteralLeadingDot = false,
+            )
     }
 }
